@@ -11,8 +11,18 @@ def normalize(factor):
     :param factor: a Factor object.
     :return: a new Factor object resulting from normalizing factor.
     '''
-    # Your code here!
-    return None
+    totalSum = 0
+    for value in factor.values:
+        totalSum += value
+    if totalSum == 0:
+        return None
+
+    newFactor = Factor(factor.name, factor.get_scope())
+
+    for index, value in enumerate(factor.values):
+        newFactor.values[index] = value / totalSum
+
+    return newFactor
 
 
 def restrict(factor, variable, value):
