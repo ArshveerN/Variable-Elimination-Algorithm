@@ -37,8 +37,22 @@ def restrict(factor, variable, value):
              This new factor no longer has variable in it.
 
     '''
-    # Your code here!
-    return None
+    variable.set_assignment(value)
+    new_scope = []
+    for f in factor.scope:
+        if f != variable:
+            new_scope.append(f)
+
+    new_factor = Factor(factor.name + f" {variable} = {value}", new_scope)
+
+    for item in itertools.product(*new_scope):
+        for index, value in enumerate(item):
+            value.set_assignment(item[i])
+
+        int_val = factor.get_value_at_current_assignments()
+        new_factor.add_value_at_current_assignment(int_val)
+
+    return new_factor
 
 
 def sum_out(factor, variable):
@@ -51,9 +65,28 @@ def sum_out(factor, variable):
     :return: a new Factor object resulting from summing out variable from the factor.
              This new factor no longer has variable in it.
     '''
-    # Your code here!
-    return None
+    new_scope = []
+    for v in factor.get_scope():
+        if v != variable:
+            new_scope.append(v)
 
+    new_factor = Factor(factor.name + f" {variable} Summed out", new_scope)
+
+    domains = []
+    for v in new_scope:
+        domains.append(v.domain())
+
+    for value_combo in itertools.product(*domains):
+        for index, value in enumerate(new_scope):
+            value.set_assignment(value_combo[index])
+        sum_ = 0
+        for val in variable.domain():
+            variable.set_assignment(val)
+            sum_ += factor.get_value_at_current_assignments()
+
+        new_factor.add_value_at_current_assignment(sum_)
+
+    return new_factor
 
 def multiply(factor_list):
     '''
