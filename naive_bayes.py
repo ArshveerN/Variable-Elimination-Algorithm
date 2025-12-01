@@ -37,20 +37,26 @@ def restrict(factor, variable, value):
              This new factor no longer has variable in it.
 
     '''
-    variable.set_assignment(value)
     new_scope = []
-    for f in factor.scope:
-        if f != variable:
-            new_scope.append(f)
+    variable.set_assignment(value)
+
+    for var in factor.get_scope():
+        if var != variable:
+            new_scope.append(var)
+
+
+    dom = []
+    for var in new_scope:
+        dom.append(var.domain())
 
     new_factor = Factor(factor.name + f" {variable} = {value}", new_scope)
 
-    for item in itertools.product(*new_scope):
-        for index, value in enumerate(item):
-            value.set_assignment(item[i])
+    for value_combo in itertools.product(*dom):
+        for index, var in enumerate(new_scope):
+            var.set_assignment(value_combo[index])
 
-        int_val = factor.get_value_at_current_assignments()
-        new_factor.add_value_at_current_assignment(int_val)
+        val = factor.get_value_at_current_assignments()
+        new_factor.add_value_at_current_assignment(val)
 
     return new_factor
 
@@ -96,8 +102,33 @@ def multiply(factor_list):
     :param factor_list: a list of Factor objects.
     :return: a new Factor object resulting from multiplying all the factors in factor_list.
     '''
-    # Your code here!
-    return None
+    if len(factor_list) == 0:
+        return None
+    scope = []
+    name = ""
+    for factor in factor_list:
+        name += factor.name
+        for variable in factor.scope:
+            if variable not in scope:
+                scope.append(variable)
+
+    new_factor = Factor("Multiplied " + name, scope)
+    domains = []
+    for v in scope:
+        domains.append(v.domain())
+
+    for value_combo in itertools.product(*domains):
+        for index, value in enumerate(scope):
+            value.set_assignment(value_combo[index])
+        mult_ = 1
+        for factor in factor_list:
+            mult_ *= factor.get_value_at_current_assignments()
+
+        new_factor.add_value_at_current_assignment(mult_)
+
+    return new_factor
+
+
 
 def ve(bayes_net, var_query, EvidenceVars):
     '''
@@ -129,8 +160,54 @@ def ve(bayes_net, var_query, EvidenceVars):
         Pr(A='a'|B=1, C='c') = 0.26.
 
     '''
-    # Your code here!
-    return None
+    factors = list(bayes_net.factors())
+    factors = restrict_factors_by_evidence(factors, EvidenceVars)
+    factors = eliminate_variables(factors, bayes_net, var_query, EvidenceVars)
+    final_factor = multiply(factors)
+    normalized = normalize(final_factor)
+    return normalized
+
+
+def eliminate_variables(factors, bayes_net, var_query, EvidenceVars):
+    vars_to_eliminate = []
+    all_vars = bayes_net.variables()
+    for var in all_vars:
+        if var == var_query:
+            continue
+        if var in EvidenceVars:
+            continue
+        vars_to_eliminate.append(var)
+
+    for var in vars_to_eliminate:
+        with_var = []
+        without_var = []
+
+        for factor in factors:
+            if var in factor.get_scope():
+                with_var.append(factor)
+            else:
+                without_var.append(factor)
+
+        if len(with_var) > 0:
+            combined = multiply(with_var)
+            summed_out = sum_out(combined, var)
+            factors = without_var
+            factors.append(summed_out)
+    return factors
+
+
+def restrict_factors_by_evidence(factors, EvidenceVars):
+    current_factors = factors
+    for evidence_var in EvidenceVars:
+        evidence_value = evidence_var.get_evidence()
+        new_factors = []
+        for factor in current_factors:
+            if evidence_var in factor.get_scope():
+                new_factors.append(restrict(factor, evidence_var, evidence_value))
+            else:
+                new_factors.append(factor)
+        current_factors = new_factors
+    return current_factors
 
 
 def naive_bayes_model(data_file, variable_domains = {"Work": ['Not Working', 'Government', 'Private', 'Self-emp'], "Education": ['<Gr12', 'HS-Graduate', 'Associate', 'Professional', 'Bachelors', 'Masters', 'Doctorate'], "Occupation": ['Admin', 'Military', 'Manual Labour', 'Office Labour', 'Service', 'Professional'], "MaritalStatus": ['Not-Married', 'Married', 'Separated', 'Widowed'], "Relationship": ['Wife', 'Own-child', 'Husband', 'Not-in-family', 'Other-relative', 'Unmarried'], "Race": ['White', 'Black', 'Asian-Pac-Islander', 'Amer-Indian-Eskimo', 'Other'], "Gender": ['Male', 'Female'], "Country": ['North-America', 'South-America', 'Europe', 'Asia', 'Middle-East', 'Carribean'], "Salary": ['<50K', '>=50K']}, class_var = Variable("Salary", ['<50K', '>=50K'])):
@@ -153,20 +230,73 @@ def naive_bayes_model(data_file, variable_domains = {"Work": ['Not Working', 'Go
             input_data.append(row)
 
     ### DOMAIN INFORMATION REFLECTS ORDER OF COLUMNS IN THE DATA SET
-    #variable_domains = {
-    #"Work": ['Not Working', 'Government', 'Private', 'Self-emp'],
-    #"Education": ['<Gr12', 'HS-Graduate', 'Associate', 'Professional', 'Bachelors', 'Masters', 'Doctorate'],
-    #"Occupation": ['Admin', 'Military', 'Manual Labour', 'Office Labour', 'Service', 'Professional'],
-    #"MaritalStatus": ['Not-Married', 'Married', 'Separated', 'Widowed'],
-    #"Relationship": ['Wife', 'Own-child', 'Husband', 'Not-in-family', 'Other-relative', 'Unmarried'],
-    #"Race": ['White', 'Black', 'Asian-Pac-Islander', 'Amer-Indian-Eskimo', 'Other'],
-    #"Gender": ['Male', 'Female'],
-    #"Country": ['North-America', 'South-America', 'Europe', 'Asia', 'Middle-East', 'Carribean'],
-    #"Salary": ['<50K', '>=50K']
-    #}
+    variable_domains = {
+    "Work": ['Not Working', 'Government', 'Private', 'Self-emp'],
+    "Education": ['<Gr12', 'HS-Graduate', 'Associate', 'Professional', 'Bachelors', 'Masters', 'Doctorate'],
+    "Occupation": ['Admin', 'Military', 'Manual Labour', 'Office Labour', 'Service', 'Professional'],
+    "MaritalStatus": ['Not-Married', 'Married', 'Separated', 'Widowed'],
+    "Relationship": ['Wife', 'Own-child', 'Husband', 'Not-in-family', 'Other-relative', 'Unmarried'],
+    "Race": ['White', 'Black', 'Asian-Pac-Islander', 'Amer-Indian-Eskimo', 'Other'],
+    "Gender": ['Male', 'Female'],
+    "Country": ['North-America', 'South-America', 'Europe', 'Asia', 'Middle-East', 'Carribean'],
+    "Salary": ['<50K', '>=50K']
+    }
+    all_vars = []
+    for attr_name in variable_domains.keys():
+        var = Variable(attr_name, variable_domains[attr_name])
+        all_vars.append(var)
 
-    # Your code here!
-    return None
+    all_variables = [class_var] + all_vars
+
+    class_factor = Factor("Salary", [class_var])
+    all_factors = [class_factor]
+
+    for var in all_vars:
+        factor = Factor(f"{var.name}", [var, class_var])
+        all_factors.append(factor)
+    
+    counts = {"Salary": {}}
+    for salary_val in class_var.domain():
+        counts["Salary"][salary_val] = 0
+
+    for var in all_vars:
+        counts[var.name] = {}
+        for attr_val in var.domain():
+            for salary_val in class_var.domain():
+                counts[var.name][(attr_val, salary_val)] = 0
+
+    for row in input_data:
+        salary_val = row[8]
+        counts["Salary"][salary_val] += 1
+
+        for i, var in enumerate(all_vars):
+            attr_val = row[i]
+            counts[var.name][(attr_val, salary_val)] += 1
+
+    total = len(input_data)
+
+    salary_probs = []
+    for salary_val in class_var.domain():
+        prob = counts["Salary"][salary_val] / total
+        salary_probs.append([salary_val, prob])
+    class_factor.add_values(salary_probs)
+
+    for idx, var in enumerate(all_vars):
+        attr_probs = []
+        for attr_val in var.domain():
+            for salary_val in class_var.domain():
+                joint_count = counts[var.name][(attr_val, salary_val)]
+                salary_count = counts["Salary"][salary_val]
+                if salary_count > 0:
+                    prob = joint_count / salary_count
+                else:
+                    prob = 0
+                attr_probs.append([attr_val, salary_val, prob])
+        all_factors[idx + 1].add_values(attr_probs)
+
+    # Create BN
+    bn = BN("Naive Bayes", all_variables, all_factors)
+    return bn
 
 def explore(bayes_net, question):
     '''    Input: bayes_net---a BN object (a Bayes bayes_net)
