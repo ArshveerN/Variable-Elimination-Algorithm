@@ -328,7 +328,6 @@ def explore(bayes_net, question):
 
     work_var, education_var, occupation_var, relationship_var, gender_var, salary_var = get_vars(bayes_net)
 
-    # Helper to set the E1 evidence (all features except Gender)
     def set_e1(line):
         work_var.set_evidence(line[0])
         education_var.set_evidence(line[1])
@@ -351,24 +350,24 @@ def explore(bayes_net, question):
 
         set_e1(row)
 
-        prob_1 = ve(bayes_net, salary_var, [work_var, education_var, occupation_var, relationship_var]) \
+        p_1 = ve(bayes_net, salary_var, [work_var, education_var, occupation_var, relationship_var]) \
             .get_value(['>=50K'])
 
         if question in [1, 2]:
             gender_var.set_evidence(gender)
             prob_e2 = ve(bayes_net, salary_var, [work_var, education_var, occupation_var, relationship_var, gender_var]) \
                 .get_value(['>=50K'])
-            if prob_1 > prob_e2:
+            if p_1 > prob_e2:
                 prob_count += 1
 
         elif question in [3, 4]:
-            if prob_1 > 0.5:
+            if p_1 > 0.5:
                 prob_count += 1
                 if actual_salary == '>=50K':
                     correct_count += 1
 
         elif question in [5, 6]:
-            if prob_1 > 0.5:
+            if p_1 > 0.5:
                 prob_count += 1
 
         reset_var([work_var, education_var, occupation_var, relationship_var, gender_var, salary_var])
@@ -394,6 +393,148 @@ def reset_var(lis):
     for var in lis:
         if hasattr(var, 'evidence_index'):
             var.evidence_index = 0
+
+# Function structure and implementation assisted by ChatGPT
+# Used to learn itertools.product() for generating variable combinations
+def explore_country_fairness(bayes_net):
+    input_data = []
+    with open('data/adult-test.csv', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        headers = next(reader, None)
+        for row in reader:
+            input_data.append(row)
+
+    work_var = bayes_net.get_variable("Work")
+    education_var = bayes_net.get_variable("Education")
+    occupation_var = bayes_net.get_variable("Occupation")
+    relationship_var = bayes_net.get_variable("Relationship")
+    country_var = bayes_net.get_variable("Country")
+    salary_var = bayes_net.get_variable("Salary")
+
+    country_stats = {}
+    for country in country_var.domain():
+        country_stats[country] = {
+            'total': 0,
+            'e1_greater_than_e2': 0,
+            'predicted_high_salary': 0,
+            'correct_high_salary': 0,
+            'actual_high_salary': 0
+        }
+
+    def set_e1(row):
+        work_var.set_evidence(row[0])
+        education_var.set_evidence(row[1])
+        occupation_var.set_evidence(row[3])
+        relationship_var.set_evidence(row[4])
+
+    def reset_vars():
+        for var in [work_var, education_var, occupation_var,
+                    relationship_var, country_var, salary_var]:
+            if hasattr(var, 'evidence_index'):
+                var.evidence_index = 0
+
+    # Process each person in test data
+    for row in input_data:
+        country = row[7]
+        actual_salary = row[8]
+
+        country_stats[country]['total'] += 1
+        if actual_salary == '>=50K':
+            country_stats[country]['actual_high_salary'] += 1
+
+        set_e1(row)
+
+        prob_e1 = ve(bayes_net, salary_var,
+                     [work_var, education_var, occupation_var, relationship_var]).get_value(['>=50K'])
+
+        country_var.set_evidence(country)
+        prob_e2 = ve(bayes_net, salary_var,
+                     [work_var, education_var, occupation_var, relationship_var, country_var]).get_value(['>=50K'])
+
+        if prob_e1 > prob_e2:
+            country_stats[country]['e1_greater_than_e2'] += 1
+
+        if prob_e1 > 0.5:
+            country_stats[country]['predicted_high_salary'] += 1
+            if actual_salary == '>=50K':
+                country_stats[country]['correct_high_salary'] += 1
+
+        reset_vars()
+
+    # Calculate percentages and print results
+    results = {}
+    print("\n" + "=" * 80)
+    print("FAIRNESS ANALYSIS BY COUNTRY OF ORIGIN")
+    print("=" * 80)
+
+    for country in sorted(country_stats.keys()):
+        stats = country_stats[country]
+        total = stats['total']
+
+        if total == 0:
+            continue
+
+        pct_e1_greater = (stats['e1_greater_than_e2'] / total) * 100
+        pct_predicted_high = (stats['predicted_high_salary'] / total) * 100
+        pct_actual_high = (stats['actual_high_salary'] / total) * 100
+
+        # Accuracy when predicted high
+        if stats['predicted_high_salary'] > 0:
+            accuracy = (stats['correct_high_salary'] / stats['predicted_high_salary']) * 100
+        else:
+            accuracy = 0
+
+        results[country] = {
+            'total_count': total,
+            'pct_e1_gt_e2': pct_e1_greater,
+            'pct_predicted_high_salary': pct_predicted_high,
+            'pct_actual_high_salary': pct_actual_high,
+            'accuracy_when_predicted_high': accuracy
+        }
+
+        print(f"\n{country}:")
+        print(f"  Sample size: {total}")
+        print(f"  % where P(S>=50K|E1) > P(S>=50K|E2): {pct_e1_greater:.2f}%")
+        print(f"  % predicted to earn >=50K (using E1): {pct_predicted_high:.2f}%")
+        print(f"  % actually earning >=50K: {pct_actual_high:.2f}%")
+        print(f"  Accuracy when predicted high salary: {accuracy:.2f}%")
+
+    # Summary analysis
+    print("\n" + "=" * 80)
+    print("FAIRNESS INSIGHTS:")
+    print("=" * 80)
+
+    # Demographic parity check
+    predicted_rates = [r['pct_predicted_high_salary'] for r in results.values() if r['total_count'] > 100]
+    if predicted_rates:
+        max_rate = max(predicted_rates)
+        min_rate = min(predicted_rates)
+        print(f"\nDemographic Parity (for groups with n>100):")
+        print(f"  Range of predicted high salary rates: {min_rate:.2f}% - {max_rate:.2f}%")
+        print(f"  Difference: {max_rate - min_rate:.2f} percentage points")
+
+    # Separation check
+    separation_diffs = []
+    for country, stats in results.items():
+        if stats['total_count'] > 100:
+            diff = abs(stats['pct_e1_gt_e2'])
+            separation_diffs.append((country, stats['pct_e1_gt_e2']))
+
+    if separation_diffs:
+        print(f"\nSeparation (% where excluding country increases predicted probability):")
+        for country, pct in sorted(separation_diffs, key=lambda x: x[1], reverse=True)[:5]:
+            print(f"  {country}: {pct:.2f}%")
+
+    # Sufficiency check (accuracy by group)
+    print(f"\nSufficiency (accuracy when predicted high salary):")
+    accuracy_by_country = [(c, r['accuracy_when_predicted_high'])
+                           for c, r in results.items() if r['total_count'] > 100]
+    for country, acc in sorted(accuracy_by_country, key=lambda x: x[1], reverse=True):
+        print(f"  {country}: {acc:.2f}%")
+
+    print("\n" + "=" * 80)
+
+    return results
 
 if __name__ == '__main__':
     nb = naive_bayes_model('data/adult-train.csv')
