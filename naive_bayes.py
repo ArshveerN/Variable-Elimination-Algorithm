@@ -38,7 +38,7 @@ def restrict(factor, variable, value):
 
     '''
     new_scope = []
-    variable.set_assignment(value)
+
 
     for var in factor.get_scope():
         if var != variable:
@@ -54,7 +54,7 @@ def restrict(factor, variable, value):
     for value_combo in itertools.product(*dom):
         for index, var in enumerate(new_scope):
             var.set_assignment(value_combo[index])
-
+        variable.set_assignment(value)
         val = factor.get_value_at_current_assignments()
         new_factor.add_value_at_current_assignment(val)
 
@@ -161,7 +161,7 @@ def ve(bayes_net, var_query, EvidenceVars):
 
     '''
     factors = list(bayes_net.factors())
-    factors = restrict_factors_by_evidence(factors, EvidenceVars)
+    factors = restrict_variables(factors, EvidenceVars)
     factors = eliminate_variables(factors, bayes_net, var_query, EvidenceVars)
     final_factor = multiply(factors)
     normalized = normalize(final_factor)
@@ -196,7 +196,7 @@ def eliminate_variables(factors, bayes_net, var_query, EvidenceVars):
     return factors
 
 
-def restrict_factors_by_evidence(factors, EvidenceVars):
+def restrict_variables(factors, EvidenceVars):
     current_factors = factors
     for evidence_var in EvidenceVars:
         evidence_value = evidence_var.get_evidence()
@@ -233,8 +233,8 @@ def naive_bayes_model(data_file, variable_domains = {"Work": ['Not Working', 'Go
     variable_domains = {
     "Work": ['Not Working', 'Government', 'Private', 'Self-emp'],
     "Education": ['<Gr12', 'HS-Graduate', 'Associate', 'Professional', 'Bachelors', 'Masters', 'Doctorate'],
-    "Occupation": ['Admin', 'Military', 'Manual Labour', 'Office Labour', 'Service', 'Professional'],
     "MaritalStatus": ['Not-Married', 'Married', 'Separated', 'Widowed'],
+    "Occupation": ['Admin', 'Military', 'Manual Labour', 'Office Labour', 'Service', 'Professional'],
     "Relationship": ['Wife', 'Own-child', 'Husband', 'Not-in-family', 'Other-relative', 'Unmarried'],
     "Race": ['White', 'Black', 'Asian-Pac-Islander', 'Amer-Indian-Eskimo', 'Other'],
     "Gender": ['Male', 'Female'],
@@ -242,36 +242,42 @@ def naive_bayes_model(data_file, variable_domains = {"Work": ['Not Working', 'Go
     "Salary": ['<50K', '>=50K']
     }
     all_vars = []
-    for attr_name in variable_domains.keys():
-        var = Variable(attr_name, variable_domains[attr_name])
-        all_vars.append(var)
+    for name in variable_domains.keys():
+        if name == "Salary":
+            continue
+        value = Variable(name, variable_domains[name])
+        all_vars.append(value)
 
     all_variables = [class_var] + all_vars
 
     class_factor = Factor("Salary", [class_var])
     all_factors = [class_factor]
 
-    for var in all_vars:
-        factor = Factor(f"{var.name}", [var, class_var])
+    for value in all_vars:
+        factor = Factor(f"{value.name}", [value, class_var])
         all_factors.append(factor)
-    
-    counts = {"Salary": {}}
-    for salary_val in class_var.domain():
-        counts["Salary"][salary_val] = 0
 
-    for var in all_vars:
-        counts[var.name] = {}
-        for attr_val in var.domain():
+    counts = {"Salary": {}}
+
+    salary_counts = {}
+    for s in class_var.domain():
+        counts["Salary"][s] = 0
+        salary_counts[s] = 0
+
+    for value in all_vars:
+        counts[value.name] = {}
+        for curr_val in value.domain():
             for salary_val in class_var.domain():
-                counts[var.name][(attr_val, salary_val)] = 0
+                counts[value.name][(curr_val, salary_val)] = 0
 
     for row in input_data:
         salary_val = row[8]
         counts["Salary"][salary_val] += 1
 
-        for i, var in enumerate(all_vars):
-            attr_val = row[i]
-            counts[var.name][(attr_val, salary_val)] += 1
+        for index in range(len(all_vars)):
+            value = all_vars[index]
+            curr_val = row[index]
+            counts[value.name][(curr_val, salary_val)] += 1
 
     total = len(input_data)
 
@@ -281,22 +287,26 @@ def naive_bayes_model(data_file, variable_domains = {"Work": ['Not Working', 'Go
         salary_probs.append([salary_val, prob])
     class_factor.add_values(salary_probs)
 
-    for idx, var in enumerate(all_vars):
-        attr_probs = []
-        for attr_val in var.domain():
-            for salary_val in class_var.domain():
-                joint_count = counts[var.name][(attr_val, salary_val)]
-                salary_count = counts["Salary"][salary_val]
-                if salary_count > 0:
-                    prob = joint_count / salary_count
-                else:
-                    prob = 0
-                attr_probs.append([attr_val, salary_val, prob])
-        all_factors[idx + 1].add_values(attr_probs)
+    for i in range(len(all_vars)):
+        fill_cpt(all_vars[i], all_factors[i + 1], counts, class_var)
 
-    # Create BN
     bn = BN("Naive Bayes", all_variables, all_factors)
     return bn
+
+
+def fill_cpt(var, factor, counts, class_var):
+    probs = []
+    for val in var.domain():
+        for salary in class_var.domain():
+            combo_count = counts[var.name][(val, salary)]
+            total_for_salary = counts["Salary"][salary]
+            if total_for_salary == 0:
+                p = 0
+            else:
+                p = combo_count / total_for_salary
+            probs.append([val, salary, p])
+
+    factor.add_values(probs)
 
 def explore(bayes_net, question):
     '''    Input: bayes_net---a BN object (a Bayes bayes_net)
@@ -310,14 +320,80 @@ def explore(bayes_net, question):
            @return a percentage (between 0 and 100)
     '''
     input_data = []
-    with open('data/adult-test.csv', newline='') as csvfile:
+    with open('data/adult-train.csv', newline='') as csvfile:
         reader = csv.reader(csvfile)
         headers = next(reader, None) #skip header row
         for row in reader:
             input_data.append(row)
 
-    # Your code here!
+    work_var, education_var, occupation_var, relationship_var, gender_var, salary_var = get_vars(bayes_net)
+
+    # Helper to set the E1 evidence (all features except Gender)
+    def set_e1(line):
+        work_var.set_evidence(line[0])
+        education_var.set_evidence(line[1])
+        occupation_var.set_evidence(line[3])
+        relationship_var.set_evidence(line[4])
+
+    total_count = 0
+    prob_count = 0
+    correct_count = 0
+
+    for row in input_data:
+        gender = row[6]
+        actual_salary = row[8]
+
+        if (question in [1, 3, 5] and gender != "Female") or \
+                (question in [2, 4, 6] and gender != "Male"):
+            continue
+
+        total_count += 1
+
+        set_e1(row)
+
+        prob_1 = ve(bayes_net, salary_var, [work_var, education_var, occupation_var, relationship_var]) \
+            .get_value(['>=50K'])
+
+        if question in [1, 2]:
+            gender_var.set_evidence(gender)
+            prob_e2 = ve(bayes_net, salary_var, [work_var, education_var, occupation_var, relationship_var, gender_var]) \
+                .get_value(['>=50K'])
+            if prob_1 > prob_e2:
+                prob_count += 1
+
+        elif question in [3, 4]:
+            if prob_1 > 0.5:
+                prob_count += 1
+                if actual_salary == '>=50K':
+                    correct_count += 1
+
+        elif question in [5, 6]:
+            if prob_1 > 0.5:
+                prob_count += 1
+
+        reset_var([work_var, education_var, occupation_var, relationship_var, gender_var, salary_var])
+
+    if question in [1, 2, 5, 6]:
+        return (prob_count / total_count * 100) if total_count > 0 else 0
+    elif question in [3, 4]:
+        return (correct_count / prob_count * 100) if prob_count > 0 else 0
+
     return None
+
+def get_vars(bayes_net):
+    return [
+        bayes_net.get_variable("Work"),
+        bayes_net.get_variable("Education"),
+        bayes_net.get_variable("Occupation"),
+        bayes_net.get_variable("Relationship"),
+        bayes_net.get_variable("Gender"),
+        bayes_net.get_variable("Salary")
+    ]
+
+def reset_var(lis):
+    for var in lis:
+        if hasattr(var, 'evidence_index'):
+            var.evidence_index = 0
 
 if __name__ == '__main__':
     nb = naive_bayes_model('data/adult-train.csv')
