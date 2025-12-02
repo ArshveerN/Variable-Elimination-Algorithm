@@ -320,7 +320,7 @@ def explore(bayes_net, question):
            @return a percentage (between 0 and 100)
     '''
     input_data = []
-    with open('data/adult-train.csv', newline='') as csvfile:
+    with open('data/adult-test.csv', newline='') as csvfile:
         reader = csv.reader(csvfile)
         headers = next(reader, None) #skip header row
         for row in reader:
